@@ -9,7 +9,17 @@ npm install
 npm start
 ```
 
-Ouvre l’URL affichée dans le terminal (souvent `http://localhost:8080/index.html`). Le client WebSocket utilise le **même hôte et port** que la page (compatible tunnels HTTPS type Cloudflare).
+Ouvre l’URL affichée dans le terminal (souvent `http://localhost:8080/index.html`, ou `8082` si les ports précédents sont pris). Le client WebSocket utilise le **même hôte et port** que la page (compatible tunnels HTTPS type Cloudflare).
+
+### Accès Internet rapide (Cloudflare)
+
+Lance le jeu en local (`npm start`), note le port (ex. **8082**), puis dans un autre terminal :
+
+```bash
+npx --yes cloudflared tunnel --url http://localhost:8082
+```
+
+Remplace `8082` par le port réel du serveur Node. Ouvre **uniquement** l’URL `https://….trycloudflare.com` affichée par cloudflared : la même machine sert la page et le WebSocket (`wss://` sur le même hôte, sans `:8082` dans l’URL publique).
 
 ## Contenu
 
