@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Paper Warfare</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <style>
+      :root {
+        --hud-bg: rgba(15, 23, 42, 0.78);
+        --hud-border: rgba(56, 189, 248, 0.45);
+        --hud-accent: #38bdf8;
+        --hud-text: #e2e8f0;
+        --hud-dim: #94a3b8;
+        --stall: #f87171;
+      }
+
+      /* HUD cockpit — inspiration sim web type fly.pieter.com */
+      .flight-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        pointer-events: none;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        visibility: hidden;
+      }
+      .flight-shell.is-active { visibility: visible; }
+
+      .flight-crosshair {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 10px;
+        height: 10px;
+        margin: -5px 0 0 -5px;
+        border: 2px solid rgba(56, 189, 248, 0.65);
+        border-radius: 50%;
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+      }
+
+      .flight-hud {
+        position: absolute;
+        left: 50%;
+        bottom: 28px;
+        transform: translateX(-50%);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 1.25rem;
+        padding: 0.85rem 1.4rem;
+        background: var(--hud-bg);
+        border: 1px solid var(--hud-border);
+        border-radius: 10px;
+        backdrop-filter: blur(10px);
+        max-width: min(520px, 94vw);
+      }
+
+      .hud-metric {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        min-width: 72px;
+      }
+      .hud-metric span.l {
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        color: var(--hud-dim);
+        text-transform: uppercase;
+      }
+      .hud-metric span.v {
+        font-size: 1.35rem;
+        font-weight: 600;
+        color: var(--hud-accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .hud-metric span.u {
+        font-size: 0.65rem;
+        color: var(--hud-dim);
+      }
+
+      .hud-throttle {
+        flex: 1 1 140px;
+        min-width: 120px;
+      }
+      .hud-throttle span.l {
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        color: var(--hud-dim);
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 0.35rem;
+      }
+      .hud-throttle-bar {
+        height: 8px;
+        background: rgba(30, 41, 59, 0.9);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .hud-throttle-fill {
+        height: 100%;
+        width: 0%;
+        border-radius: 4px;
+        background: linear-gradient(90deg, #0ea5e9, var(--hud-accent));
+        transition: width 0.08s linear;
+      }
+
+      .flight-hint {
+        position: absolute;
+        left: 50%;
+        top: 22%;
+        transform: translateX(-50%);
+        padding: 0.5rem 0.9rem;
+        font-size: 0.78rem;
+        color: var(--hud-text);
+        background: rgba(15, 23, 42, 0.55);
+        border-radius: 6px;
+        border: 1px solid var(--hud-border);
+        opacity: 0;
+        transition: opacity 0.35s ease;
+        max-width: 90vw;
+        text-align: center;
+      }
+      .flight-hint.is-visible { opacity: 1; }
+
+      .flight-stall {
+        position: absolute;
+        left: 50%;
+        top: 38%;
+        transform: translateX(-50%);
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.25em;
+        color: var(--stall);
+        text-shadow: 0 0 20px rgba(248, 113, 113, 0.5);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .flight-stall.is-on { opacity: 1; }
+
+      .flight-keys {
+        position: absolute;
+        right: 16px;
+        bottom: 100px;
+        font-size: 0.65rem;
+        line-height: 1.5;
+        color: var(--hud-dim);
+        text-align: right;
+        max-width: 200px;
+      }
+
+      .mp-lobby-hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1200;
+        padding: 0.65rem 0.85rem;
+        background: var(--hud-bg);
+        border: 1px solid var(--hud-border);
+        border-radius: 8px;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 0.8rem;
+        color: var(--hud-text);
+        max-width: min(260px, 88vw);
+        pointer-events: none;
+      }
+      .mp-lobby-hud strong {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: var(--hud-accent);
+        letter-spacing: 0.06em;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+      }
+      .mp-lobby-hud ul {
+        margin: 0;
+        padding-left: 1.1rem;
+        line-height: 1.45;
+        opacity: 0.92;
+      }
+
+      .lobby-gate {
+        position: fixed;
+        inset: 0;
+        z-index: 100000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.85rem;
+        background: rgba(2, 6, 23, 0.94);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        color: var(--hud-text);
+      }
+      .lobby-gate.is-hidden {
+        display: none;
+      }
+      .lobby-gate label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 0.88rem;
+        width: min(320px, 90vw);
+      }
+      .lobby-gate input[type='text'] {
+        padding: 0.65rem 0.75rem;
+        font-size: 1rem;
+        border-radius: 6px;
+        border: 1px solid var(--hud-border);
+        background: rgba(15, 23, 42, 0.95);
+        color: var(--hud-text);
+      }
+      .lobby-gate button {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #0f172a;
+        background: var(--hud-accent);
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .lobby-gate .lobby-help {
+        margin: 0;
+        opacity: 0.82;
+        max-width: 22rem;
+        text-align: center;
+        font-size: 0.88rem;
+      }
+      .lobby-gate .lobby-err {
+        margin: 0;
+        color: var(--stall);
+        font-size: 0.85rem;
+        min-height: 1.2em;
+      }
+
+      .defeat-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 200000;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        background: rgba(15, 3, 6, 0.82);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        color: #fecaca;
+      }
+      .defeat-overlay.is-visible {
+        display: flex;
+      }
+      .defeat-overlay h2 {
+        margin: 0;
+        font-size: 1.85rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .defeat-overlay p {
+        margin: 0;
+        color: #e2e8f0;
+        opacity: 0.9;
+      }
+      .defeat-overlay button {
+        padding: 0.65rem 1.35rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #0f172a;
+        background: var(--hud-accent);
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+
+      .remote-player-root[data-dead='true'] a-gltf-model {
+        opacity: 0.35;
+      }
+    </style>
+    <script>
+      /* Embarquement + UI (inspiré presentation fly.pieter.com — fluide, HUD séparé du 3D) */
+      AFRAME.registerComponent('plane-board', {
+        schema: {
+          planeSelector: { type: 'string', default: '.plane-slot' },
+          range: { type: 'number', default: 1.35 }
+        },
+        init: function () {
+          this.flying = false;
+          this.planeEl = null;
+          this.nearestSlot = null;
+          this.restTransform = null;
+          this.cam = this.el.querySelector('a-camera');
+          this.hint = document.querySelector('#board-hint');
+          this.shell = document.getElementById('flight-shell');
+          this.onKey = this.onKey.bind(this);
+          this.onPtrLock = this.onPtrLock.bind(this);
+          this.flightClickLock = this.flightClickLock.bind(this);
+          window.addEventListener('keydown', this.onKey);
+          document.addEventListener('pointerlockchange', this.onPtrLock);
+        },
+        remove: function () {
+          window.removeEventListener('keydown', this.onKey);
+          document.removeEventListener('pointerlockchange', this.onPtrLock);
+        },
+        onPtrLock: function () {
+          var c = this.el.sceneEl && this.el.sceneEl.canvas;
+          var hint = document.getElementById('flight-pointer-hint');
+          if (!hint || !this.flying) return;
+          hint.classList.toggle('is-visible', document.pointerLockElement !== c);
+        },
+        onKey: function (e) {
+          if (e.repeat) return;
+          if (e.code !== 'KeyF') return;
+          if (window.MP && window.MP.dead) return;
+          if (this.flying) this.exitPlane();
+          else if (this.isNearPlane()) this.enterPlane();
+        },
+        flightClickLock: function () {
+          if (!this.flying) return;
+          var c = this.el.sceneEl && this.el.sceneEl.canvas;
+          if (c && c.requestPointerLock) c.requestPointerLock();
+        },
+        isNearPlane: function () {
+          var sel = this.data.planeSelector;
+          var slots = this.el.sceneEl.querySelectorAll(sel);
+          var best = null;
+          var bestD = this.data.range;
+          var a = new THREE.Vector3();
+          var b = new THREE.Vector3();
+          this.cam.object3D.getWorldPosition(a);
+          for (var i = 0; i < slots.length; i++) {
+            slots[i].object3D.getWorldPosition(b);
+            var d = a.distanceTo(b);
+            if (d < bestD) {
+              bestD = d;
+              best = slots[i];
+            }
+          }
+          this.nearestSlot = best;
+          return best !== null;
+        },
+        tick: function () {
+          if (!this.hint) return;
+          if (this.flying) {
+            this.hint.setAttribute('visible', false);
+            return;
+          }
+          var near = this.isNearPlane();
+          this.hint.setAttribute('visible', near);
+          this.hint.setAttribute('value', near ? 'F · monter à bord' : '');
+        },
+        enterPlane: function () {
+          if (!this.nearestSlot) return;
+          this.planeEl = this.nearestSlot;
+          this.restTransform = {
+            position: AFRAME.utils.coordinates.parse(this.planeEl.getAttribute('position')),
+            rotation: AFRAME.utils.coordinates.parse(this.planeEl.getAttribute('rotation'))
+          };
+          this.flying = true;
+          this.el.setAttribute('wasd-controls', { enabled: false });
+          var rig = this.el.object3D;
+          var camObj = this.cam.object3D;
+          camObj.updateMatrixWorld(true);
+          var q = new THREE.Quaternion();
+          camObj.getWorldQuaternion(q);
+          rig.quaternion.copy(q);
+          camObj.rotation.set(0, 0, 0);
+          this.cam.removeAttribute('look-controls');
+          this.el.setAttribute('flight-controls', { enabled: true });
+          this.cam.querySelector('a-cursor') && this.cam.querySelector('a-cursor').setAttribute('visible', false);
+          if (this.shell) this.shell.classList.add('is-active');
+          this.el.sceneEl.addEventListener('click', this.flightClickLock);
+          setTimeout(this.flightClickLock, 80);
+          this.cam.appendChild(this.planeEl);
+          this.planeEl.setAttribute('position', { x: 0.05, y: -0.12, z: -0.4 });
+          this.planeEl.setAttribute('rotation', { x: 12, y: 190, z: 0 });
+          stopGroundLoop();
+          playInflightLoop();
+          this.onPtrLock();
+        },
+        exitPlane: function () {
+          this.flying = false;
+          this.el.sceneEl.removeEventListener('click', this.flightClickLock);
+          document.exitPointerLock();
+          this.el.setAttribute('flight-controls', { enabled: false });
+          this.el.setAttribute('wasd-controls', { acceleration: 34, fly: true, enabled: true });
+          this.el.setAttribute('rotation', { x: 0, y: 0, z: 0 });
+          this.cam.setAttribute('look-controls', '');
+          this.cam.querySelector('a-cursor') && this.cam.querySelector('a-cursor').setAttribute('visible', true);
+          if (this.shell) {
+            this.shell.classList.remove('is-active');
+            document.getElementById('flight-pointer-hint') && document.getElementById('flight-pointer-hint').classList.remove('is-visible');
+            document.getElementById('flight-stall') && document.getElementById('flight-stall').classList.remove('is-on');
+          }
+          var sc = document.querySelector('a-scene');
+          if (this.planeEl && this.restTransform) {
+            sc.appendChild(this.planeEl);
+            var r = this.restTransform;
+            this.planeEl.setAttribute('position', r.position);
+            this.planeEl.setAttribute('rotation', r.rotation);
+          }
+          this.planeEl = null;
+          this.restTransform = null;
+          this.el.setAttribute('position', { x: 0, y: 0, z: 0 });
+          stopInflightLoop();
+          playGroundLoop();
+        }
+      });
+
+      /**
+       * Vol arcade propre : pitch/yaw/roll dans un repère cohérent → un seul quaternion par frame.
+       * airspeed aligné sur le nez (pas de dérapage latéral parasite). Gaz lissé + mini trim gravité / portance.
+       */
+      AFRAME.registerComponent('flight-controls', {
+        schema: {
+          enabled: { default: false },
+          cruiseSpeed: { default: 12 },
+          maxSpeed: { default: 36 },
+          minSpeed: { default: 4 },
+          throttleSpd: { default: 0.28 },
+          speedResponse: { default: 1.75 },
+          mouseSensitivity: { default: 0.00135 },
+          pitchLimit: { default: 1.05 },
+          yawKeyRate: { default: 0.65 },
+          rollKeyRate: { default: 1.25 },
+          coordinatedRollMax: { default: 0.42 },
+          coordLerp: { default: 4.2 },
+          rollDamp: { default: 2.8 },
+          gravity: { default: 9 },
+          liftK: { default: 0.022 },
+          stallSpeed: { default: 9 },
+          stallSink: { default: 18 },
+          mushFactor: { default: 0.42 }
+        },
+        init: function () {
+          this.keys = {};
+          this.camEl = this.el.querySelector('a-camera');
+          this.pitch = 0;
+          this.yaw = 0;
+          this.roll = 0;
+          this.throttle = 0;
+          this.speed = 0;
+          this._euler = new THREE.Euler(0, 0, 0, 'YXZ');
+          this._quat = new THREE.Quaternion();
+          this._fwd = new THREE.Vector3();
+          this.missileCd = 0;
+          this._eye = new THREE.Vector3();
+          this._keyDn = function (e) {
+            this.keys[e.code] = true;
+            if (this.data.enabled && e.code === 'Space' && (!window.MP || !window.MP.dead)) e.preventDefault();
+          }.bind(this);
+          this._keyUp = function (e) { this.keys[e.code] = false; }.bind(this);
+          this._mm = this._onMouse.bind(this);
+        },
+        /* Gaz [0..1] tel que min + t*(max-min) == cruiseSpeed (équilibre dès l’embarquement, sans Z). */
+        _cruiseThrottle: function () {
+          var mn = this.data.minSpeed;
+          var mx = this.data.maxSpeed;
+          var c = this.data.cruiseSpeed;
+          var r = mx - mn;
+          if (r <= 1e-6) return 0;
+          return Math.max(0, Math.min(1, (c - mn) / r));
+        },
+        _spawnMissile: function (rig, forward) {
+          var sc = this.el.sceneEl;
+          if (!sc || !this.camEl) return;
+          this.camEl.object3D.getWorldPosition(this._eye);
+          var f = forward.clone().normalize();
+          var spawn = this._eye.clone().addScaledVector(f, 0.45);
+          var ms = 62;
+          var oid = window.MP && window.MP.myId ? window.MP.myId : '_';
+          var m = document.createElement('a-entity');
+          m.setAttribute('position', { x: spawn.x, y: spawn.y, z: spawn.z });
+          m.setAttribute('geometry', 'primitive: cone; radiusBottom: 0.065; radiusTop: 0.012; height: 0.58');
+          m.setAttribute(
+            'material',
+            'color: #ffedd5; emissive: #f97316; emissiveIntensity: 1.15; metalness: 0.2; roughness: 0.38'
+          );
+          m.setAttribute('combat-missile', {
+            ownerId: oid,
+            vx: f.x * ms,
+            vy: f.y * ms,
+            vz: f.z * ms,
+            ttl: 8
+          });
+          sc.appendChild(m);
+          playGunshot();
+          if (window.MP && window.MP.sendFire) {
+            window.MP.sendFire(spawn.x, spawn.y, spawn.z, f.x * ms, f.y * ms, f.z * ms);
+          }
+        },
+        update: function (oldD) {
+          var on = this.data.enabled;
+          var was = oldD.enabled === true;
+          if (on && !was) {
+            window.addEventListener('keydown', this._keyDn);
+            window.addEventListener('keyup', this._keyUp);
+            document.addEventListener('mousemove', this._mm);
+            if (this.camEl && this.camEl.components['look-controls']) this.camEl.removeAttribute('look-controls');
+            var rig = this.el.object3D;
+            this._euler.setFromQuaternion(rig.quaternion, 'YXZ');
+            this.pitch = this._euler.x;
+            this.yaw = this._euler.y;
+            this.roll = this._euler.z;
+            this.throttle = this._cruiseThrottle();
+            this.speed = this.data.cruiseSpeed;
+          }
+          if (!on && was) {
+            window.removeEventListener('keydown', this._keyDn);
+            window.removeEventListener('keyup', this._keyUp);
+            document.removeEventListener('mousemove', this._mm);
+            this.keys = {};
+            this.missileCd = 0;
+            this.speed = 0;
+            if (this.camEl) {
+              this.camEl.object3D.rotation.set(0, 0, 0);
+              this.camEl.setAttribute('look-controls', '');
+            }
+          }
+        },
+        remove: function () {
+          window.removeEventListener('keydown', this._keyDn);
+          window.removeEventListener('keyup', this._keyUp);
+          document.removeEventListener('mousemove', this._mm);
+        },
+        _mush: function () {
+          var s = this.speed;
+          if (s >= this.data.stallSpeed) return 1;
+          return this.data.mushFactor + (1 - this.data.mushFactor) * (s / this.data.stallSpeed);
+        },
+        _onMouse: function (e) {
+          if (!this.data.enabled) return;
+          var cv = this.el.sceneEl.canvas;
+          if (document.pointerLockElement !== cv) return;
+          var m = this._mush();
+          var s = this.data.mouseSensitivity * m;
+          this.yaw -= e.movementX * s;
+          this.pitch -= e.movementY * s;
+          var lim = this.data.pitchLimit;
+          this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
+        },
+        tick: function (t, dt) {
+          if (!this.data.enabled) return;
+          if (window.MP && window.MP.dead) return;
+          var d = Math.min(dt / 1000, 0.05);
+          if (d <= 0) return;
+          var k = this.keys;
+          var rig = this.el.object3D;
+          var m = this._mush();
+
+          if (k.KeyZ) this.throttle = Math.min(1, this.throttle + this.data.throttleSpd * d);
+          if (k.KeyS) this.throttle = Math.max(0, this.throttle - this.data.throttleSpd * 1.15 * d);
+
+          var tSpd =
+            this.data.minSpeed +
+            this.throttle * (this.data.maxSpeed - this.data.minSpeed);
+          this.speed += (tSpd - this.speed) * this.data.speedResponse * d;
+
+          var turn = (k.KeyE ? 1 : 0) - (k.KeyA ? 1 : 0);
+          this.yaw -= turn * this.data.yawKeyRate * m * d;
+
+          var tgtRoll = -turn * this.data.coordinatedRollMax;
+          if (k.KeyQ) this.roll += this.data.rollKeyRate * m * d;
+          else if (k.KeyD) this.roll -= this.data.rollKeyRate * m * d;
+          else this.roll += (tgtRoll - this.roll) * this.data.coordLerp * d;
+
+          this.roll *= Math.exp(-this.data.rollDamp * 0.08 * d);
+          this.roll = Math.max(-1.15, Math.min(1.15, this.roll));
+
+          this._euler.set(this.pitch, this.yaw, this.roll, 'YXZ');
+          this._quat.setFromEuler(this._euler);
+          rig.quaternion.copy(this._quat);
+
+          this._fwd.set(0, 0, -1).applyQuaternion(rig.quaternion).normalize();
+          rig.position.addScaledVector(this._fwd, this.speed * d);
+
+          this.missileCd = Math.max(0, this.missileCd - d);
+          if (k.Space && this.missileCd <= 0 && (!window.MP || !window.MP.dead)) {
+            this.missileCd = 0.42;
+            this._spawnMissile(rig, this._fwd);
+          }
+
+          var stall = this.speed < this.data.stallSpeed;
+          if (stall) {
+            var a = 1 - this.speed / this.data.stallSpeed;
+            rig.position.y -= this.data.stallSink * a * d;
+          }
+
+          rig.position.y -= this.data.gravity * d * (stall ? 1 : 0.35);
+          rig.position.y += Math.max(0, this._fwd.y) * this.speed * this.data.liftK * d;
+
+          /* HUD DOM */
+          var elS = document.getElementById('hud-speed');
+          var elA = document.getElementById('hud-alt');
+          var elF = document.getElementById('hud-throttle-fill');
+          var elSt = document.getElementById('flight-stall');
+          if (elS) elS.textContent = String(Math.round(this.speed * 3.6));
+          if (elA) elA.textContent = String(Math.round(rig.position.y * 10));
+          if (elF) elF.style.width = String(Math.round(this.throttle * 100)) + '%';
+          if (elSt) elSt.classList.toggle('is-on', stall);
+        }
+      });
+
+      AFRAME.registerComponent('combat-missile', {
+        schema: {
+          ownerId: { type: 'string', default: '' },
+          vx: { type: 'number', default: 0 },
+          vy: { type: 'number', default: 0 },
+          vz: { type: 'number', default: 0 },
+          ttl: { type: 'number', default: 8 }
+        },
+        init: function () {
+          this.v = new THREE.Vector3(this.data.vx, this.data.vy, this.data.vz);
+          this.tLeft = this.data.ttl;
+          this.hitSent = false;
+          var f = this.v.clone();
+          if (f.lengthSq() < 1e-6) f.set(0, 0, -1);
+          else f.normalize();
+          var q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), f);
+          this.el.object3D.quaternion.copy(q);
+          this._wPos = new THREE.Vector3();
+          this._tPos = new THREE.Vector3();
+        },
+        tick: function (time, dt) {
+          var d = Math.min(dt / 1000, 0.06);
+          if (d <= 0 || this.hitSent) return;
+          var p = this.el.object3D.position;
+          p.x += this.v.x * d;
+          p.y += this.v.y * d;
+          p.z += this.v.z * d;
+          this.tLeft -= d;
+
+          if (window.MP && window.MP.myId) {
+            this.el.object3D.getWorldPosition(this._wPos);
+            var myId = window.MP.myId;
+            var ownerId = this.data.ownerId;
+            if (ownerId !== myId) {
+              var rig = document.querySelector('#rig');
+              if (rig && window.MP && !window.MP.dead) {
+                rig.object3D.getWorldPosition(this._tPos);
+                if (this._tPos.distanceTo(this._wPos) < 1.35) {
+                  this.hitSent = true;
+                  window.MP.sendHit(myId, this.data.ownerId);
+                  if (this.el.parentEl) this.el.remove();
+                  return;
+                }
+              }
+            } else {
+              var roots = document.querySelectorAll('.remote-player-root');
+              for (var i = 0; i < roots.length; i++) {
+                var elR = roots[i];
+                var pid = elR.getAttribute('data-pid');
+                if (!pid || pid === myId) continue;
+                if (elR.getAttribute('data-dead') === 'true') continue;
+                elR.object3D.getWorldPosition(this._tPos);
+                if (this._tPos.distanceTo(this._wPos) < 1.35) {
+                  this.hitSent = true;
+                  window.MP.sendHit(pid, myId);
+                  if (this.el.parentEl) this.el.remove();
+                  return;
+                }
+              }
+            }
+          }
+
+          if (this.tLeft <= 0 && this.el.parentEl) this.el.remove();
+        }
+      });
+
+      AFRAME.registerComponent('network-avatar-sync', {
+        tick: function (time, dt) {
+          if (!window.MP || !window.MP.connected) return;
+          this._acc = (this._acc || 0) + dt;
+          if (this._acc < 75) return;
+          this._acc = 0;
+          var rig = this.el.object3D;
+          rig.updateMatrixWorld(true);
+          var p = rig.position;
+          var q = rig.quaternion;
+          var pb = this.el.components['plane-board'];
+          var flying = pb && pb.flying;
+          window.MP.sendMove(p.x, p.y, p.z, q.x, q.y, q.z, q.w, flying);
+        }
+      });
+
+      AFRAME.registerComponent('city-place', {
+        init: function () {
+          var wrap = this.el;
+          var cityEl = wrap.querySelector('#city-mesh');
+          if (!cityEl) return;
+          cityEl.addEventListener('model-error', function (e) {
+            console.error('City GLB:', e.detail && e.detail.src, e.detail);
+          });
+          cityEl.addEventListener('model-loaded', function () {
+            var model = cityEl.getObject3D('mesh');
+            if (!model) return;
+            model.updateMatrixWorld(true);
+            var box = new THREE.Box3().setFromObject(model);
+            if (box.isEmpty()) return;
+            var cx = (box.min.x + box.max.x) / 2;
+            var cz = (box.min.z + box.max.z) / 2;
+            var p = wrap.object3D.position;
+            p.x -= cx;
+            p.z -= cz;
+            p.y -= box.min.y;
+            wrap.setAttribute('position', { x: p.x, y: p.y, z: p.z });
+          });
+        }
+      });
+
+      /* Moteurs en <audio> HTML (boucles) : même contexte que le clic « Activer le son », pas de conflit WebAudio */
+      function playGroundLoop() {
+        var el = document.getElementById('ground-motor-html');
+        if (!el) return;
+        el.loop = true;
+        el.volume = 0.52;
+        var p = el.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+      function stopGroundLoop() {
+        var el = document.getElementById('ground-motor-html');
+        if (!el) return;
+        el.pause();
+        el.currentTime = 0;
+      }
+      function playInflightLoop() {
+        var el = document.getElementById('inflight-html');
+        if (!el) return;
+        el.volume = 0.68;
+        el.currentTime = 0;
+        var p = el.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+      function stopInflightLoop() {
+        var el = document.getElementById('inflight-html');
+        if (!el) return;
+        el.pause();
+        el.currentTime = 0;
+      }
+      /* Un nouvel Audio à chaque tir = salves rapides sans blocage du pool A-Frame */
+      function playGunshot() {
+        var a = new Audio('gunshoot.mp3');
+        a.volume = 0.88;
+        var p = a.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+
+      function startAudioFromLobby() {
+        if (typeof THREE !== 'undefined' && THREE.AudioContext) {
+          var ctx = THREE.AudioContext.getContext();
+          if (ctx && ctx.state === 'suspended') ctx.resume();
+        }
+        var rig = document.querySelector('#rig');
+        var pb = rig && rig.components && rig.components['plane-board'];
+        if (pb && pb.flying) playInflightLoop();
+        else playGroundLoop();
+      }
+
+      window.MP = {
+        ws: null,
+        myId: null,
+        connected: false,
+        dead: false,
+        lastRoster: [],
+        remoteRoots: {},
+        /* Même hôte + port que la page. Sur tunnel HTTPS (Cloudflare, etc.), pas de :8080 : le WSS passe en 443. */
+        wsUrl: function () {
+          var isHttps = location.protocol === 'https:';
+          var wsProto = isHttps ? 'wss:' : 'ws:';
+          var host = location.hostname;
+          var port = location.port;
+          if (!host) host = 'localhost';
+          if (port) return wsProto + '//' + host + ':' + port;
+          return wsProto + '//' + host;
+        },
+        ensureRemote: function (pl) {
+          if (!pl || pl.id === MP.myId || MP.remoteRoots[pl.id]) return;
+          var wrap = document.getElementById('remote-players');
+          if (!wrap) return;
+          var ent = document.createElement('a-entity');
+          ent.classList.add('remote-player-root');
+          ent.setAttribute('data-pid', pl.id);
+          if (pl.alive === false) ent.setAttribute('data-dead', 'true');
+          ent.object3D.position.set(pl.x || 0, pl.y || 0, pl.z || 0);
+          ent.object3D.quaternion.set(pl.qx || 0, pl.qy || 0, pl.qz || 0, pl.qw !== undefined ? pl.qw : 1);
+          var inner = document.createElement('a-entity');
+          inner.setAttribute('scale', '0.0345 0.0345 0.0345');
+          var model = document.createElement('a-gltf-model');
+          model.setAttribute('src', '#mon-modele');
+          inner.appendChild(model);
+          var label = document.createElement('a-text');
+          label.setAttribute('position', { x: 0, y: 0.95, z: 0 });
+          label.setAttribute('align', 'center');
+          label.setAttribute('color', '#fbbf24');
+          label.setAttribute('width', '5');
+          label.setAttribute('value', pl.nickname || '');
+          ent.appendChild(inner);
+          ent.appendChild(label);
+          wrap.appendChild(ent);
+          MP.remoteRoots[pl.id] = ent;
+        },
+        updateLobbyRoster: function (players) {
+          MP.lastRoster = (players || []).map(function (x) {
+            return Object.assign({}, x);
+          });
+          var ul = document.getElementById('lobby-roster');
+          if (!ul) return;
+          ul.innerHTML = '';
+          MP.lastRoster.forEach(function (p) {
+            var li = document.createElement('li');
+            var tag = p.nickname || p.id;
+            if (p.id === MP.myId) tag += ' (toi)';
+            if (p.alive === false) tag += ' · éliminé';
+            li.textContent = tag;
+            ul.appendChild(li);
+          });
+        },
+        setRosterAlive: function (id, alive) {
+          MP.lastRoster.forEach(function (p) {
+            if (p.id === id) p.alive = alive;
+          });
+          MP.updateLobbyRoster(MP.lastRoster);
+        },
+        applyMove: function (msg) {
+          if (!msg || msg.id === MP.myId) return;
+          var ent = MP.remoteRoots[msg.id];
+          if (!ent) {
+            MP.ensureRemote({
+              id: msg.id,
+              nickname: '?',
+              x: msg.x,
+              y: msg.y,
+              z: msg.z,
+              qx: msg.qx,
+              qy: msg.qy,
+              qz: msg.qz,
+              qw: msg.qw,
+              inPlane: msg.inPlane,
+              alive: true
+            });
+            ent = MP.remoteRoots[msg.id];
+          }
+          if (!ent) return;
+          ent.object3D.position.set(msg.x, msg.y, msg.z);
+          ent.object3D.quaternion.set(msg.qx, msg.qy, msg.qz, msg.qw);
+        },
+        spawnNetworkMissile: function (msg) {
+          if (!msg || msg.ownerId === MP.myId) return;
+          var sc = document.querySelector('a-scene');
+          if (!sc) return;
+          var m = document.createElement('a-entity');
+          m.setAttribute('position', { x: msg.x, y: msg.y, z: msg.z });
+          m.setAttribute('geometry', 'primitive: cone; radiusBottom: 0.065; radiusTop: 0.012; height: 0.58');
+          m.setAttribute(
+            'material',
+            'color: #fde68a; emissive: #ea580c; emissiveIntensity: 1.05; metalness: 0.2; roughness: 0.38'
+          );
+          m.setAttribute('combat-missile', {
+            ownerId: msg.ownerId,
+            vx: msg.vx,
+            vy: msg.vy,
+            vz: msg.vz,
+            ttl: 8
+          });
+          sc.appendChild(m);
+        },
+        showDefeat: function () {
+          MP.dead = true;
+          var rig = document.querySelector('#rig');
+          var pb = rig && rig.components && rig.components['plane-board'];
+          if (pb && pb.flying) pb.exitPlane();
+          if (rig) rig.setAttribute('wasd-controls', { acceleration: 34, fly: true, enabled: false });
+          var ov = document.getElementById('defeat-overlay');
+          if (ov) {
+            ov.classList.add('is-visible');
+            ov.setAttribute('aria-hidden', 'false');
+          }
+        },
+        hideDefeat: function () {
+          MP.dead = false;
+          var ov = document.getElementById('defeat-overlay');
+          if (ov) {
+            ov.classList.remove('is-visible');
+            ov.setAttribute('aria-hidden', 'true');
+          }
+        },
+        sendMove: function (x, y, z, qx, qy, qz, qw, inPlane) {
+          if (MP.dead) return;
+          if (!MP.ws || MP.ws.readyState !== WebSocket.OPEN) return;
+          MP.ws.send(
+            JSON.stringify({
+              type: 'move',
+              x: x,
+              y: y,
+              z: z,
+              qx: qx,
+              qy: qy,
+              qz: qz,
+              qw: qw,
+              inPlane: !!inPlane
+            })
+          );
+        },
+        sendFire: function (x, y, z, vx, vy, vz) {
+          if (!MP.ws || MP.ws.readyState !== WebSocket.OPEN) return;
+          MP.ws.send(
+            JSON.stringify({
+              type: 'fire',
+              sid: String(Date.now()) + Math.random().toString(36).slice(2, 8),
+              x: x,
+              y: y,
+              z: z,
+              vx: vx,
+              vy: vy,
+              vz: vz
+            })
+          );
+        },
+        sendHit: function (victimId, byId) {
+          if (!MP.ws || MP.ws.readyState !== WebSocket.OPEN) return;
+          MP.ws.send(
+            JSON.stringify({
+              type: 'hit',
+              victimId: victimId,
+              byId: byId || MP.myId
+            })
+          );
+        },
+        sendRespawn: function () {
+          if (!MP.ws || MP.ws.readyState !== WebSocket.OPEN) return;
+          MP.ws.send(JSON.stringify({ type: 'respawn' }));
+        },
+        connect: function (nickname, lobbyGateEl) {
+          var url = MP.wsUrl();
+          var ws = new WebSocket(url);
+          MP.ws = ws;
+          ws.onmessage = function (ev) {
+            var msg;
+            try {
+              msg = JSON.parse(ev.data);
+            } catch (e) {
+              return;
+            }
+            if (msg.type === 'welcome') {
+              MP.myId = msg.id;
+              MP.connected = true;
+              (msg.players || []).forEach(function (pl) {
+                if (pl.id !== MP.myId) MP.ensureRemote(pl);
+              });
+              MP.updateLobbyRoster(msg.players);
+              if (lobbyGateEl) {
+                lobbyGateEl.classList.add('is-hidden');
+                lobbyGateEl.setAttribute('aria-hidden', 'true');
+              }
+              return;
+            }
+            if (msg.type === 'peerJoined') {
+              MP.ensureRemote(msg.player);
+              var exists = MP.lastRoster.some(function (p) {
+                return p.id === msg.player.id;
+              });
+              if (!exists) MP.lastRoster.push(Object.assign({}, msg.player));
+              MP.updateLobbyRoster(MP.lastRoster);
+              return;
+            }
+            if (msg.type === 'peerLeft') {
+              var ent = MP.remoteRoots[msg.id];
+              if (ent && ent.parentEl) ent.remove();
+              delete MP.remoteRoots[msg.id];
+              MP.lastRoster = MP.lastRoster.filter(function (p) {
+                return p.id !== msg.id;
+              });
+              MP.updateLobbyRoster(MP.lastRoster);
+              return;
+            }
+            if (msg.type === 'playerMove') {
+              MP.applyMove(msg);
+              return;
+            }
+            if (msg.type === 'fire') {
+              MP.spawnNetworkMissile(msg);
+              return;
+            }
+            if (msg.type === 'playerHit') {
+              MP.setRosterAlive(msg.victimId, false);
+              if (msg.victimId === MP.myId) MP.showDefeat();
+              var victEnt = MP.remoteRoots[msg.victimId];
+              if (victEnt) victEnt.setAttribute('data-dead', 'true');
+              return;
+            }
+            if (msg.type === 'playerRespawn') {
+              MP.setRosterAlive(msg.id, true);
+              if (msg.id === MP.myId) {
+                MP.hideDefeat();
+                var rig = document.querySelector('#rig');
+                if (rig) {
+                  rig.setAttribute('position', { x: 0, y: 0, z: 0 });
+                  rig.setAttribute('wasd-controls', { acceleration: 34, fly: true, enabled: true });
+                }
+              }
+              var rent = MP.remoteRoots[msg.id];
+              if (rent) rent.removeAttribute('data-dead');
+              return;
+            }
+          };
+          ws.onopen = function () {
+            ws.send(JSON.stringify({ type: 'hello', nickname: nickname }));
+          };
+          ws.onerror = function () {
+            var eel = document.getElementById('lobby-err');
+            if (!eel) return;
+            var origin = location.origin || location.protocol + '//' + location.host;
+            eel.innerHTML =
+              'Connexion WebSocket impossible depuis <strong>' +
+              origin +
+              '</strong>.<br/>En local : ouvre l’URL exacte du terminal (avec le bon port, ex. …8082…). Via un tunnel (Cloudflare, ngrok…), le serveur local doit être relié au <em>même</em> port que celui que le tunnel pointe ; en HTTPS, le client utilise <code>wss://</code> sur le même hôte sans forcer :8080.';
+          };
+          ws.onclose = function () {
+            MP.connected = false;
+            if (!MP.myId && lobbyGateEl) {
+              lobbyGateEl.classList.remove('is-hidden');
+              lobbyGateEl.setAttribute('aria-hidden', 'false');
+            }
+          };
+        }
+      };
+
+      function initLobbyGate() {
+        var gate = document.getElementById('lobby-gate');
+        var btn = document.getElementById('lobby-join-btn');
+        var input = document.getElementById('lobby-nickname');
+        var err = document.getElementById('lobby-err');
+        if (!gate || !btn || !input) return;
+        btn.addEventListener('click', function () {
+          if (err) err.textContent = '';
+          var nick = String(input.value || '').trim();
+          if (nick.length < 1) {
+            if (err) err.textContent = 'Choisis un pseudo.';
+            input.focus();
+            return;
+          }
+          startAudioFromLobby();
+          MP.connect(nick, gate);
+        });
+        input.addEventListener('keydown', function (e) {
+          if (e.code === 'Enter') btn.click();
+        });
+      }
+
+      function initDefeatRespawn() {
+        var btn = document.getElementById('defeat-respawn-btn');
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+          MP.sendRespawn();
+        });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+          initLobbyGate();
+          initDefeatRespawn();
+        });
+      } else {
+        initLobbyGate();
+        initDefeatRespawn();
+      }
+
+      /* Ciel dégradé 100 % local (aucune URL) — évite ciel noir si texture distante bloquée */
+      AFRAME.registerComponent('sky-gradient', {
+        init: function () {
+          var el = this.el;
+          var cw = 8;
+          var ch = 512;
+          var canvas = document.createElement('canvas');
+          canvas.width = cw;
+          canvas.height = ch;
+          var g2 = canvas.getContext('2d');
+          var gr = g2.createLinearGradient(0, 0, 0, ch);
+          gr.addColorStop(0, '#3d8aed');
+          gr.addColorStop(0.28, '#74b4ff');
+          gr.addColorStop(0.52, '#b8dcff');
+          gr.addColorStop(0.68, '#e8f4ff');
+          gr.addColorStop(0.82, '#fff4dc');
+          gr.addColorStop(1, '#a8cceb');
+          g2.fillStyle = gr;
+          g2.fillRect(0, 0, cw, ch);
+          var tex = new THREE.CanvasTexture(canvas);
+          tex.needsUpdate = true;
+          if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+
+          function apply() {
+            var mesh = el.getObject3D('mesh');
+            if (!mesh || !mesh.material) return false;
+            var mat = mesh.material;
+            if (Array.isArray(mat)) mat = mat[0];
+            mat.map = tex;
+            mat.color.setRGB(1, 1, 1);
+            if (mat.fog !== undefined) mat.fog = false;
+            mat.needsUpdate = true;
+            return true;
+          }
+          el.addEventListener('object3dset', function (ev) {
+            if (ev.detail.type === 'mesh') apply();
+          });
+          if (el.sceneEl) {
+            el.sceneEl.addEventListener('loaded', function () {
+              if (!apply()) setTimeout(apply, 50);
+            });
+          }
+          setTimeout(apply, 0);
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <div id="flight-shell" class="flight-shell" aria-hidden="true">
+      <div class="flight-crosshair"></div>
+      <div id="flight-pointer-hint" class="flight-hint">Clic · capturer la souris pour piloter</div>
+      <div id="flight-stall" class="flight-stall">DÉCROCHAGE</div>
+      <div class="flight-hud">
+        <div class="hud-metric">
+          <span class="l">IAS</span>
+          <span class="v" id="hud-speed">0</span>
+          <span class="u">km/h</span>
+        </div>
+        <div class="hud-metric">
+          <span class="l">ALT</span>
+          <span class="v" id="hud-alt">0</span>
+          <span class="u">×0,1 u</span>
+        </div>
+        <div class="hud-metric hud-throttle">
+          <span class="l">Gaz</span>
+          <div class="hud-throttle-bar"><div class="hud-throttle-fill" id="hud-throttle-fill"></div></div>
+        </div>
+      </div>
+      <div class="flight-keys">
+        Z / S · gaz<br>
+        Souris · assiette<br>
+        A / E · lacet (+ roulis coord.)<br>
+        Q / D · roulis manuel<br>
+        Espace · missile<br>
+        F · atterrir
+      </div>
+    </div>
+
+    <div id="mp-lobby-hud" class="mp-lobby-hud" aria-live="polite">
+      <strong>Lobby</strong>
+      <ul id="lobby-roster"></ul>
+    </div>
+
+    <a-scene
+      light="defaultLightsEnabled: false"
+      renderer="antialias: true; colorManagement: true"
+      fog="type: exponential; color: #dceeff; density: 0.003">
+      <a-assets timeout="600000">
+        <a-asset-item id="mon-modele" src="paper_plane.glb"></a-asset-item>
+        <a-asset-item id="city-map" src="city_mapnot_a_scan.glb"></a-asset-item>
+      </a-assets>
+
+      <a-entity id="remote-players" position="0 0 0"></a-entity>
+
+      <a-entity
+        id="rig"
+        position="0 0 0"
+        wasd-controls="acceleration: 34; fly: true"
+        flight-controls="enabled: false"
+        network-avatar-sync
+        plane-board="range: 1.45">
+        <a-camera id="cam" position="0 1.6 0" look-controls>
+          <a-cursor color="#38bdf8"></a-cursor>
+          <a-text
+            id="board-hint"
+            value=""
+            align="center"
+            color="#bae6fd"
+            width="2.2"
+            position="0 -0.2 -0.85"
+            visible="false">
+          </a-text>
+        </a-camera>
+      </a-entity>
+
+      <a-light type="ambient" intensity="0.88" color="#eef6ff"></a-light>
+      <a-light type="hemisphere" intensity="0.62" ground-color="#6b93b8" color="#fffdf5" position="0 120 0"></a-light>
+      <a-light type="directional" intensity="0.95" position="-28 54 -36" color="#fff8ee"></a-light>
+      <a-light type="point" color="#7dd3fc" intensity="1.25" position="0 18 -8" distance="70" decay="2"></a-light>
+
+      <a-text value="Choisis un avion — F pour monter" position="0 2.45 -4" align="center" color="#7dd3fc" scale="1.35 1.35 1.35"></a-text>
+
+      <a-entity id="planes-row">
+        <a-entity class="plane-slot" data-slot="0" position="-8 1.15 -2.75" rotation="0 35 0">
+          <a-entity scale="0.0345 0.0345 0.0345"><a-gltf-model src="#mon-modele"></a-gltf-model></a-entity>
+        </a-entity>
+        <a-entity class="plane-slot" data-slot="1" position="-4 1.15 -2.75" rotation="0 35 0">
+          <a-entity scale="0.0345 0.0345 0.0345"><a-gltf-model src="#mon-modele"></a-gltf-model></a-entity>
+        </a-entity>
+        <a-entity class="plane-slot" data-slot="2" position="0 1.15 -2.75" rotation="0 35 0">
+          <a-entity scale="0.0345 0.0345 0.0345"><a-gltf-model src="#mon-modele"></a-gltf-model></a-entity>
+        </a-entity>
+        <a-entity class="plane-slot" data-slot="3" position="4 1.15 -2.75" rotation="0 35 0">
+          <a-entity scale="0.0345 0.0345 0.0345"><a-gltf-model src="#mon-modele"></a-gltf-model></a-entity>
+        </a-entity>
+        <a-entity class="plane-slot" data-slot="4" position="8 1.15 -2.75" rotation="0 35 0">
+          <a-entity scale="0.0345 0.0345 0.0345"><a-gltf-model src="#mon-modele"></a-gltf-model></a-entity>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="city-sol-wrap" position="0 0 -5.5" city-place>
+        <a-gltf-model id="city-mesh" src="#city-map" scale="0.0025 0.0025 0.0025"></a-gltf-model>
+      </a-entity>
+
+      <a-plane position="0 0 -8" rotation="-90 0 0" width="36" height="36" color="#1b3350"></a-plane>
+      <a-sky rotation="0 48 0" sky-gradient material="shader: flat; fog: false"></a-sky>
+    </a-scene>
+
+    <audio id="ground-motor-html" src="motorsound-low.mp3" loop preload="auto" playsinline></audio>
+    <audio
+      id="inflight-html"
+      src="inflymotor.mp3"
+      loop
+      preload="auto"
+      playsinline></audio>
+
+    <div id="lobby-gate" class="lobby-gate" role="dialog" aria-modal="true" aria-labelledby="lobby-gate-title">
+      <p id="lobby-gate-title" style="margin:0;font-size:1.15rem;">Rejoindre le salon</p>
+      <p class="lobby-help">
+        Pseudo + son : interaction requise pour le navigateur. Ouvre la page <strong>uniquement</strong> via l’URL
+        affichée par <code>npm start</code> (ex. <code>http://localhost:8082/index.html</code>) — pas Live Preview /
+        autre port : le salon WebSocket utilise le même port que la page.
+      </p>
+      <label>
+        Pseudo
+        <input id="lobby-nickname" type="text" maxlength="24" autocomplete="nickname" placeholder="Ex. Pilote_42" />
+      </label>
+      <p id="lobby-err" class="lobby-err" role="alert"></p>
+      <button type="button" id="lobby-join-btn">Entrer (son + multijoueur)</button>
+    </div>
+
+    <div id="defeat-overlay" class="defeat-overlay" aria-hidden="true" role="alertdialog" aria-labelledby="defeat-title">
+      <h2 id="defeat-title">You lost</h2>
+      <p>Tu as été touché par un missile.</p>
+      <button type="button" id="defeat-respawn-btn">Rejouer</button>
+    </div>
+  </body>
+</html>

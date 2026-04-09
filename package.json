@@ -1,0 +1,15 @@
+{
+  "name": "paperwarfare",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Browser multiplayer flight combat — A-Frame + WebSocket",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
