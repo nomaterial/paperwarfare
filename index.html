@@ -291,6 +291,10 @@
           this.cam = this.el.querySelector('a-camera');
           this.hint = document.querySelector('#board-hint');
           this.shell = document.getElementById('flight-shell');
+          this._slotsCache = null;
+          this._vecA = new THREE.Vector3();
+          this._vecB = new THREE.Vector3();
+          this._lastHintVisible = null;
           this.onKey = this.onKey.bind(this);
           this.onPtrLock = this.onPtrLock.bind(this);
           this.flightClickLock = this.flightClickLock.bind(this);
@@ -320,19 +324,19 @@
           if (c && c.requestPointerLock) c.requestPointerLock();
         },
         isNearPlane: function () {
-          var sel = this.data.planeSelector;
-          var slots = this.el.sceneEl.querySelectorAll(sel);
+          /* Slots mis en cache : ils ne bougent jamais, pas besoin de re-querier le DOM */
+          if (!this._slotsCache) {
+            this._slotsCache = Array.from(this.el.sceneEl.querySelectorAll(this.data.planeSelector));
+          }
           var best = null;
           var bestD = this.data.range;
-          var a = new THREE.Vector3();
-          var b = new THREE.Vector3();
-          this.cam.object3D.getWorldPosition(a);
-          for (var i = 0; i < slots.length; i++) {
-            slots[i].object3D.getWorldPosition(b);
-            var d = a.distanceTo(b);
+          this.cam.object3D.getWorldPosition(this._vecA);
+          for (var i = 0; i < this._slotsCache.length; i++) {
+            this._slotsCache[i].object3D.getWorldPosition(this._vecB);
+            var d = this._vecA.distanceTo(this._vecB);
             if (d < bestD) {
               bestD = d;
-              best = slots[i];
+              best = this._slotsCache[i];
             }
           }
           this.nearestSlot = best;
@@ -341,12 +345,18 @@
         tick: function () {
           if (!this.hint) return;
           if (this.flying) {
-            this.hint.setAttribute('visible', false);
+            if (this._lastHintVisible !== false) {
+              this.hint.setAttribute('visible', false);
+              this._lastHintVisible = false;
+            }
             return;
           }
           var near = this.isNearPlane();
-          this.hint.setAttribute('visible', near);
-          this.hint.setAttribute('value', near ? 'F · monter à bord' : '');
+          if (near !== this._lastHintVisible) {
+            this.hint.setAttribute('visible', near);
+            this.hint.setAttribute('value', near ? 'F · monter à bord' : '');
+            this._lastHintVisible = near;
+          }
         },
         enterPlane: function () {
           if (!this.nearestSlot) return;
@@ -588,15 +598,17 @@
           rig.position.y -= this.data.gravity * d * (stall ? 1 : 0.35);
           rig.position.y += Math.max(0, this._fwd.y) * this.speed * this.data.liftK * d;
 
-          /* HUD DOM */
-          var elS = document.getElementById('hud-speed');
-          var elA = document.getElementById('hud-alt');
-          var elF = document.getElementById('hud-throttle-fill');
-          var elSt = document.getElementById('flight-stall');
-          if (elS) elS.textContent = String(Math.round(this.speed * 3.6));
-          if (elA) elA.textContent = String(Math.round(rig.position.y * 10));
-          if (elF) elF.style.width = String(Math.round(this.throttle * 100)) + '%';
-          if (elSt) elSt.classList.toggle('is-on', stall);
+          /* HUD DOM — refs cachées au premier tick, plus jamais de getElementById */
+          if (!this._elS) {
+            this._elS = document.getElementById('hud-speed');
+            this._elA = document.getElementById('hud-alt');
+            this._elF = document.getElementById('hud-throttle-fill');
+            this._elSt = document.getElementById('flight-stall');
+          }
+          if (this._elS) this._elS.textContent = String(Math.round(this.speed * 3.6));
+          if (this._elA) this._elA.textContent = String(Math.round(rig.position.y * 10));
+          if (this._elF) this._elF.style.width = String(Math.round(this.throttle * 100)) + '%';
+          if (this._elSt) this._elSt.classList.toggle('is-on', stall);
         }
       });
 
@@ -619,6 +631,7 @@
           this.el.object3D.quaternion.copy(q);
           this._wPos = new THREE.Vector3();
           this._tPos = new THREE.Vector3();
+          this._rig = null;
         },
         tick: function (time, dt) {
           var d = Math.min(dt / 1000, 0.06);
@@ -634,9 +647,10 @@
             var myId = window.MP.myId;
             var ownerId = this.data.ownerId;
             if (ownerId !== myId) {
-              var rig = document.querySelector('#rig');
-              if (rig && window.MP && !window.MP.dead) {
-                rig.object3D.getWorldPosition(this._tPos);
+              /* #rig ne change jamais : on le cache à la première utilisation */
+              if (!this._rig) this._rig = document.getElementById('rig');
+              if (this._rig && !window.MP.dead) {
+                this._rig.object3D.getWorldPosition(this._tPos);
                 if (this._tPos.distanceTo(this._wPos) < 1.35) {
                   this.hitSent = true;
                   window.MP.sendHit(myId, this.data.ownerId);
@@ -645,12 +659,14 @@
                 }
               }
             } else {
-              var roots = document.querySelectorAll('.remote-player-root');
-              for (var i = 0; i < roots.length; i++) {
-                var elR = roots[i];
-                var pid = elR.getAttribute('data-pid');
-                if (!pid || pid === myId) continue;
-                if (elR.getAttribute('data-dead') === 'true') continue;
+              /* MP.remoteRoots est un index JS direct, pas de querySelectorAll */
+              var roots = window.MP.remoteRoots;
+              var pids = Object.keys(roots);
+              for (var i = 0; i < pids.length; i++) {
+                var pid = pids[i];
+                if (pid === myId) continue;
+                var elR = roots[pid];
+                if (!elR || elR.getAttribute('data-dead') === 'true') continue;
                 elR.object3D.getWorldPosition(this._tPos);
                 if (this._tPos.distanceTo(this._wPos) < 1.35) {
                   this.hitSent = true;
@@ -666,16 +682,53 @@
         }
       });
 
+      /* Interpolation douce des avatars distants : évite le saut brusque à chaque paquet réseau */
+      AFRAME.registerComponent('remote-player-lerp', {
+        init: function () {
+          this._tv = new THREE.Vector3();
+          this._tq = new THREE.Quaternion();
+        },
+        tick: function (time, dt) {
+          var target = this.el._lerpTarget;
+          if (!target) return;
+          var d = Math.min(dt / 1000, 0.05);
+          /* alpha exponentiel : converge en ~3-4 frames après réception d'un paquet */
+          var alpha = 1 - Math.exp(-20 * d);
+          var obj = this.el.object3D;
+          this._tv.set(target.x, target.y, target.z);
+          obj.position.lerp(this._tv, alpha);
+          this._tq.set(target.qx, target.qy, target.qz, target.qw);
+          obj.quaternion.slerp(this._tq, alpha);
+        }
+      });
+
       AFRAME.registerComponent('network-avatar-sync', {
+        init: function () {
+          this._acc = 0;
+          this._lx = null; this._ly = null; this._lz = null;
+          this._lqx = null; this._lqy = null; this._lqz = null; this._lqw = null;
+        },
         tick: function (time, dt) {
           if (!window.MP || !window.MP.connected) return;
-          this._acc = (this._acc || 0) + dt;
+          this._acc += dt;
           if (this._acc < 75) return;
           this._acc = 0;
           var rig = this.el.object3D;
           rig.updateMatrixWorld(true);
           var p = rig.position;
           var q = rig.quaternion;
+          /* Ne transmet que si la position/rotation a réellement changé */
+          var EPS = 0.003, QEPS = 0.0008;
+          if (this._lx !== null &&
+              Math.abs(p.x - this._lx) < EPS &&
+              Math.abs(p.y - this._ly) < EPS &&
+              Math.abs(p.z - this._lz) < EPS &&
+              Math.abs(q.x - this._lqx) < QEPS &&
+              Math.abs(q.y - this._lqy) < QEPS &&
+              Math.abs(q.z - this._lqz) < QEPS &&
+              Math.abs(q.w - this._lqw) < QEPS) return;
+          this._lx = p.x; this._ly = p.y; this._lz = p.z;
+          this._lqx = q.x; this._lqy = q.y; this._lqz = q.z; this._lqw = q.w;
           var pb = this.el.components['plane-board'];
           var flying = pb && pb.flying;
           window.MP.sendMove(p.x, p.y, p.z, q.x, q.y, q.z, q.w, flying);
@@ -736,10 +789,20 @@
         el.pause();
         el.currentTime = 0;
       }
-      /* Un nouvel Audio à chaque tir = salves rapides sans blocage du pool A-Frame */
+      /* Pool circulaire de 4 instances Audio pré-créées — zéro allocation à chaque tir */
+      var _shotPool = null, _shotIdx = 0;
       function playGunshot() {
-        var a = new Audio('gunshoot.mp3');
-        a.volume = 0.88;
+        if (!_shotPool) {
+          _shotPool = [];
+          for (var _i = 0; _i < 4; _i++) {
+            var _a = new Audio('gunshoot.mp3');
+            _a.volume = 0.88;
+            _shotPool.push(_a);
+          }
+        }
+        var a = _shotPool[_shotIdx % 4];
+        _shotIdx++;
+        a.currentTime = 0;
         var p = a.play();
         if (p && p.catch) p.catch(function () {});
       }
@@ -795,6 +858,13 @@
           label.setAttribute('value', pl.nickname || '');
           ent.appendChild(inner);
           ent.appendChild(label);
+          ent.setAttribute('remote-player-lerp', '');
+          /* Initialise la cible d'interpolation à la position initiale */
+          ent._lerpTarget = {
+            x: pl.x || 0, y: pl.y || 0, z: pl.z || 0,
+            qx: pl.qx || 0, qy: pl.qy || 0, qz: pl.qz || 0,
+            qw: pl.qw !== undefined ? pl.qw : 1
+          };
           wrap.appendChild(ent);
           MP.remoteRoots[pl.id] = ent;
         },
@@ -840,8 +910,16 @@
             ent = MP.remoteRoots[msg.id];
           }
           if (!ent) return;
-          ent.object3D.position.set(msg.x, msg.y, msg.z);
-          ent.object3D.quaternion.set(msg.qx, msg.qy, msg.qz, msg.qw);
+          /* Met à jour la cible : le composant remote-player-lerp se charge du lissage */
+          if (!ent._lerpTarget) {
+            ent._lerpTarget = { x: msg.x, y: msg.y, z: msg.z, qx: msg.qx, qy: msg.qy, qz: msg.qz, qw: msg.qw };
+            ent.object3D.position.set(msg.x, msg.y, msg.z);
+            ent.object3D.quaternion.set(msg.qx, msg.qy, msg.qz, msg.qw);
+          } else {
+            ent._lerpTarget.x = msg.x; ent._lerpTarget.y = msg.y; ent._lerpTarget.z = msg.z;
+            ent._lerpTarget.qx = msg.qx; ent._lerpTarget.qy = msg.qy;
+            ent._lerpTarget.qz = msg.qz; ent._lerpTarget.qw = msg.qw;
+          }
         },
         spawnNetworkMissile: function (msg) {
           if (!msg || msg.ownerId === MP.myId) return;
@@ -883,22 +961,16 @@
             ov.setAttribute('aria-hidden', 'true');
           }
         },
+        _moveMsg: { type: 'move', x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, inPlane: false },
         sendMove: function (x, y, z, qx, qy, qz, qw, inPlane) {
           if (MP.dead) return;
           if (!MP.ws || MP.ws.readyState !== WebSocket.OPEN) return;
-          MP.ws.send(
-            JSON.stringify({
-              type: 'move',
-              x: x,
-              y: y,
-              z: z,
-              qx: qx,
-              qy: qy,
-              qz: qz,
-              qw: qw,
-              inPlane: !!inPlane
-            })
-          );
+          /* Réutilise le même objet → pas d'allocation GC à chaque envoi */
+          var m = MP._moveMsg;
+          m.x = x; m.y = y; m.z = z;
+          m.qx = qx; m.qy = qy; m.qz = qz; m.qw = qw;
+          m.inPlane = !!inPlane;
+          MP.ws.send(JSON.stringify(m));
         },
         sendFire: function (x, y, z, vx, vy, vz) {
           if (!MP.ws || MP.ws.readyState !== WebSocket.OPEN) return;
@@ -974,6 +1046,11 @@
             }
             if (msg.type === 'playerMove') {
               MP.applyMove(msg);
+              return;
+            }
+            if (msg.type === 'batch') {
+              var mvs = msg.moves;
+              for (var i = 0; i < mvs.length; i++) MP.applyMove(mvs[i]);
               return;
             }
             if (msg.type === 'fire') {
@@ -1149,7 +1226,7 @@
 
     <a-scene
       light="defaultLightsEnabled: false"
-      renderer="antialias: true; colorManagement: true"
+      renderer="antialias: false; colorManagement: true"
       fog="type: exponential; color: #dceeff; density: 0.003">
       <a-assets timeout="600000">
         <a-asset-item id="mon-modele" src="paper_plane.glb"></a-asset-item>
