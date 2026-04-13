@@ -36,6 +36,10 @@ function safeJoin(root, reqPath) {
   return full;
 }
 
+// Cache mémoire des assets lourds (GLB, MP3…) : zéro I/O disque après le 1er chargement
+const fileCache = new Map();
+const CACHEABLE = new Set(['.glb', '.mp3', '.png', '.jpg', '.jpeg', '.svg', '.ico', '.woff', '.woff2']);
+
 const server = http.createServer((req, res) => {
   let u = req.url.split('?')[0];
   if (u === '/') u = '/index.html';
@@ -45,15 +49,25 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
+  const ext = path.extname(filePath).toLowerCase();
+  const type = MIME[ext] || 'application/octet-stream';
+  const headers = { 'Content-Type': type };
+  if (CACHEABLE.has(ext)) headers['Cache-Control'] = 'public, max-age=3600';
+
+  if (fileCache.has(filePath)) {
+    res.writeHead(200, headers);
+    res.end(fileCache.get(filePath));
+    return;
+  }
+
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Not found');
       return;
     }
-    const ext = path.extname(filePath).toLowerCase();
-    const type = MIME[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type });
+    if (CACHEABLE.has(ext)) fileCache.set(filePath, data);
+    res.writeHead(200, headers);
     res.end(data);
   });
 });
@@ -146,6 +160,10 @@ wss.on('connection', (ws) => {
     if (!p || p.ws !== ws) return;
 
     if (msg.type === 'move' && p.alive) {
+      // Rate-limit : max 1 update toutes les 40ms (~25/s) par client
+      const now = Date.now();
+      if (p._lastMove && now - p._lastMove < 40) return;
+      p._lastMove = now;
       p.x = Number(msg.x) || 0;
       p.y = Number(msg.y) || 0;
       p.z = Number(msg.z) || 0;
@@ -154,21 +172,7 @@ wss.on('connection', (ws) => {
       p.qz = Number(msg.qz) || 0;
       p.qw = Number(msg.qw) || 1;
       p.inPlane = !!msg.inPlane;
-      broadcast(
-        {
-          type: 'playerMove',
-          id: myId,
-          x: p.x,
-          y: p.y,
-          z: p.z,
-          qx: p.qx,
-          qy: p.qy,
-          qz: p.qz,
-          qw: p.qw,
-          inPlane: p.inPlane
-        },
-        ws
-      );
+      p._dirty = true; // sera envoyé dans le prochain tick groupé
       return;
     }
 
@@ -222,6 +226,20 @@ wss.on('connection', (ws) => {
     broadcast({ type: 'peerLeft', id: myId });
   });
 });
+
+// Tick serveur : regroupe toutes les positions modifiées en un seul message batch
+// → réduit radicalement le nombre de messages WS avec plusieurs joueurs
+setInterval(function () {
+  if (players.size < 2) return;
+  const moves = [];
+  for (const [id, p] of players) {
+    if (!p._dirty) continue;
+    p._dirty = false;
+    moves.push({ id, x: p.x, y: p.y, z: p.z, qx: p.qx, qy: p.qy, qz: p.qz, qw: p.qw, inPlane: p.inPlane });
+  }
+  if (moves.length === 0) return;
+  broadcast({ type: 'batch', moves });
+}, 50);
 
 var listenPort = PORT_BASE;
 var portAttempts = 0;
